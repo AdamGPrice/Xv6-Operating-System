@@ -1,5 +1,6 @@
 struct stat;
 struct rtcdate;
+struct drawcalls;
 
 // system calls
 int fork(void);
@@ -24,7 +25,13 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 int getch(void);
+
 // TODO: Declare your user APIs for your system calls.
+int setvideomode(int);
+int setpixel(int, int, int);
+int setline(int, int, int, int, int);
+int senddrawcalls(struct drawcalls*);
+
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -39,3 +46,10 @@ void* memset(void*, int, uint);
 void* malloc(uint);
 void free(void*);
 int atoi(const char*);
+
+// graphics.c
+void drawbegin();
+void drawend();
+void drawpixel(int, int, int);
+void drawline(int, int, int, int, int);
+void fillrect(int, int, int, int, int);

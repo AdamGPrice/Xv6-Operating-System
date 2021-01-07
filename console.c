@@ -14,6 +14,7 @@
 #include "mmu.h"
 #include "proc.h"
 #include "x86.h"
+#include "maths.h"
 
 #define VGA_0x03_MEMORY P2V(0xb8000)
 #define VGA_0x03_WIDTH 80
@@ -22,6 +23,9 @@
 #define VGA_0x13_MEMORY P2V(0xA0000)
 #define VGA_0x13_WIDTH 320
 #define VGA_0x13_HEIGHT 200
+
+#define VGA_0x12_WIDTH 640
+#define VGA_0x12_HEIGHT 480
 
 static void consputc(int);
 
@@ -34,8 +38,10 @@ uint currentvgamode = 0x03;
  */
 static struct {
     struct spinlock lock;
-
     int locking;
+
+    ushort glyphs[VGA_0x03_HEIGHT * VGA_0x03_WIDTH];
+    int cursor;
 } cons;
 
 static void printint(int xx, int base, int sign) {
@@ -146,15 +152,33 @@ void panic(char *s) {
 #define BACKSPACE 0x100
 #define CRTPORT 0x3d4
 
-static void cgaputc(int c) {
+int getcursorpos() {
     int pos;
-    ushort* crt = VGA_0x03_MEMORY;
 
     // Cursor position: col + 80*row.
     outb(CRTPORT, 14);
     pos = inb(CRTPORT + 1) << 8;
     outb(CRTPORT, 15);
     pos |= inb(CRTPORT + 1);
+
+    return pos;
+}
+
+void setcursorpos(int pos) {
+    outb(CRTPORT, 14);
+    outb(CRTPORT + 1, pos >> 8);
+    outb(CRTPORT, 15);
+    outb(CRTPORT + 1, pos);
+}
+
+static void cgaputc(int c) {
+    int pos = getcursorpos();
+    ushort* crt = VGA_0x03_MEMORY;
+
+    if (currentvgamode != 0x03) {
+        crt = cons.glyphs;
+        pos = cons.cursor;
+    }
 
     if (c == '\n') {
         pos += 80 - pos % 80;
@@ -178,10 +202,12 @@ static void cgaputc(int c) {
         memset(crt + pos, 0, sizeof(crt[0]) * (24 * 80 - pos));
     }
 
-    outb(CRTPORT, 14);
-    outb(CRTPORT + 1, pos >> 8);
-    outb(CRTPORT, 15);
-    outb(CRTPORT + 1, pos);
+    if (currentvgamode != 0x03) {
+        cons.cursor = pos;
+    } else {
+        setcursorpos(pos);
+    }
+
     crt[pos] = ' ' | 0x0700;
 }
 
@@ -794,6 +820,28 @@ void writeFont(uchar * fontBuffer, unsigned int fontHeight) {
     outb(VGA_GC_DATA, gc6);
 }
 
+void savetextmemory() {
+    // Copy video text video memeory into a ushort array
+    int total = VGA_0x03_HEIGHT * VGA_0x03_WIDTH;
+    ushort* addr = (ushort*)VGA_0x03_MEMORY;
+    for (int i = 0; i < total; i++) {
+        cons.glyphs[i] = *addr;
+        addr++;
+    }
+    cons.cursor = getcursorpos();
+}
+
+void loadtextmemory() {
+    // Place the cotents in the ushort array back into video memory.
+    int total = VGA_0x03_HEIGHT * VGA_0x03_WIDTH;
+    ushort* addr = (ushort*)VGA_0x03_MEMORY;
+    for (int i = 0; i < total; i++) {
+        *addr = cons.glyphs[i];
+        addr++;
+    }
+    setcursorpos(cons.cursor);
+}
+
 /**
  * Video mode switching function which must be called from kernel-space, returning `0` if a valid
  * mode was requested, otherwise `-1`.
@@ -813,23 +861,25 @@ int consolevgamode(int vgamode) {
         case 0x03: {
             writeVideoRegisters(registers_80x25_text);
             writeFont(font_8x16, 16);
-
+            loadtextmemory();
             currentvgamode = 0x03;
             errorcode = 0;
         } break;
 
         case 0x12: {
+            savetextmemory();
             writeVideoRegisters(registers_640x480x16);
-
             currentvgamode = 0x12;
             errorcode = 0;
+            consoleclearscreen();
         } break;
 
         case 0x13: {
+            savetextmemory();
             writeVideoRegisters(registers_320x200x256);
-
             currentvgamode = 0x13;
             errorcode = 0;
+            consoleclearscreen();
         } break;
     }
 
@@ -875,4 +925,137 @@ uchar* consolevgabuffer() {
     }
 
     return base;
+}
+
+
+// Console graphics functions
+
+void consoleclearscreen() {
+    if (currentvgamode == 0x13) {
+        memset(VGA_0x13_MEMORY, 0, VGA_0x13_WIDTH * VGA_0x13_HEIGHT);
+    } 
+    else if (currentvgamode == 0x12) {
+        int size = (VGA_0x12_WIDTH * VGA_0x12_HEIGHT) / 8;
+        for (int i = 0; i < 4; i++) {
+            consolevgaplane(i);
+            uchar* addr = (uchar*)consolevgabuffer();
+            memset(addr, 0, size);
+        }
+    }
+}
+
+int consolesetpixel(int x, int y, int colour) {
+    if (currentvgamode == 0x13) {
+        if (x < 0 || x >= VGA_0x13_WIDTH || y < 0 || y >= VGA_0x13_HEIGHT) {
+            return -1;
+        } else {
+            uchar* addr = VGA_0x13_MEMORY + VGA_0x13_WIDTH * y + x;
+            *addr = colour;
+        }
+    } 
+    else if (currentvgamode == 0x12) {
+        if (x < 0 || x >= VGA_0x12_WIDTH || y < 0 || y >= VGA_0x12_HEIGHT) {
+            return -1;
+        } else {
+            int memoffset = VGA_0x12_WIDTH * y + x;
+            int bitoffset = memoffset % 8;
+            memoffset /= 8;
+
+            for (int i = 0; i < 4; i++) {
+                int bit = (colour >> i) & 1;
+                consolevgaplane(i);
+                uchar* addr = consolevgabuffer() + memoffset;
+                uchar new = 128 >> bitoffset;
+                if (bit) {
+                    *addr = new | *addr;
+                } else {
+                    *addr = ~(new) & *addr;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+// Bresenham Line Algorithm
+void consoledrawline(int x0, int y0, int x1, int y1, int colour) {
+    int dx =  abs (x1 - x0); 
+    int dy = -abs (y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1; 
+    int err = dx + dy; 
+    int e2;
+    
+    consolesetpixel(x0, y0, colour);
+    while (!(x0 == x1 && y0 == y1)) {
+
+        e2 = 2 * err;
+        if (e2 >= dy) { 
+            err += dy; 
+            x0 += sx; 
+        }
+        if (e2 <= dx) { 
+            err += dx; 
+            y0 += sy; 
+        }
+        consolesetpixel(x0, y0, colour);
+    }
+}
+
+void memsethorizontalline(int y, int x0, int x1, int colour) {
+    int memoffset1 = VGA_0x12_WIDTH * y + x0;
+    int bitoffset1 = memoffset1 % 8;
+    memoffset1 /= 8;
+
+    int memoffset2 = VGA_0x12_WIDTH * y + x1;
+    int bitoffset2 = memoffset2 % 8;
+    memoffset2 /= 8;
+
+    for (int i = 0; i < 4; i++) {
+        int bit = (colour >> i) & 1;
+        consolevgaplane(i);
+        uchar* memstart = consolevgabuffer() + memoffset1;
+
+        if (bit) {
+            memset(memstart + 1, 255, memoffset2 - memoffset1 - 1);
+        }
+        else {
+            memset(memstart + 1, 0, memoffset2 - memoffset1 - 1);
+        }
+    }
+
+    // just use set pixel for parts of the line
+    // which don't fit inside one single byte
+    for (int i = bitoffset1; i < 8; i++) {
+        consolesetpixel(x0 + 7 - i, y, colour);
+    }
+
+    for (int i = 0; i < bitoffset2; i++) {
+        consolesetpixel(x1 - 1 - i, y, colour);
+    }
+}
+
+void consolefillrect(int x, int y, int width, int height, int colour) {
+    // if width is 1 byte or less just use simple algorithm
+    if (currentvgamode == 0x13 ||  width <= 8) {
+        for (int i = x; i < x + width; i++) {
+            for (int j = y; j < y + height; j++) {
+                consolesetpixel(i, j, colour);
+            }
+        }
+    } else if (currentvgamode == 0x12) {
+        // little bit of error handling
+        if (x + width > VGA_0x12_WIDTH) {
+            width = VGA_0x12_WIDTH - x;
+        }
+        if (height > VGA_0x12_HEIGHT) {
+            height = VGA_0x12_HEIGHT - y;
+        }
+
+        // More efficienct fill rect for mode 12
+        // memeset each line of the rect with a few exceptions
+        for (int i = y; i < y + height; i++) {
+            memsethorizontalline(i, x, x + width, colour);
+        }
+    }
 }
