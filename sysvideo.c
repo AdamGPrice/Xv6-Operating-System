@@ -49,15 +49,33 @@ int sys_senddrawcalls(void) {
 
     for (int i = 0; i < calls->index; i++) {
         drawcall call = calls->array[i];
-        if (call.type == DRAW_PIXEL) {
-            consolesetpixel(call.x, call.y, call.colour);
-        } 
-        else if (call.type == DRAW_LINE) {
-            consoledrawline(call.x0, call.y0, call.x1, call.y1, call.colour);
-        } 
-        else if (call.type == FILL_RECT) {
-            consolefillrect(call.x, call.y, call.width, call.height, call.colour);
-        }  
+        
+        switch (call.type)
+        {
+            case FILL_SCREEN:
+                consoleclearscreen(call.colour);
+                break;
+            case DRAW_PIXEL:
+                consolesetpixel(call.x, call.y, call.colour);
+                break;            
+            case DRAW_LINE:
+                consoledrawline(call.x0, call.y0, call.x1, call.y1, call.colour);
+                break;
+            case DRAW_CIRCLE:
+                consoledrawcircle(call.x, call.y, call.r, call.colour);
+                break;
+            case FILL_RECT:
+                consolefillrect(call.x, call.y, call.width, call.height, call.colour);
+                break;
+            case FILL_POLY:
+                consolefillpolygon(call.points, call.count, call.colour);
+                break;
+            case DRAW_POLY:
+                consoledrawpolygon(call.points, call.count, call.colour);
+                break;
+            default:
+                break;
+        }
     } 
     return 0;
 }

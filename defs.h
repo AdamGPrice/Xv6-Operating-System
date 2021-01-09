@@ -24,10 +24,13 @@ int             consoleget(void);
 int             consolevgamode(int);
 uchar*          consolevgabuffer(void);
 void            consolevgaplane(uchar);
-void            consoleclearscreen();
+void            consoleclearscreen(int);
 int             consolesetpixel(int, int, int);
 void            consoledrawline(int, int, int, int, int);
+void            consoledrawcircle(int, int, int, int);
 void            consolefillrect(int, int, int, int, int);
+void            consolefillpolygon(int*, int, int);
+void            consoledrawpolygon(int*, int, int);
 void            panic(char*) __attribute__((noreturn));
 
 // exec.c

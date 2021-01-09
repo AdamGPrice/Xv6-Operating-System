@@ -50,6 +50,10 @@ int atoi(const char*);
 // graphics.c
 void drawbegin();
 void drawend();
+void fillscreen(int);
 void drawpixel(int, int, int);
 void drawline(int, int, int, int, int);
+void drawcircle(int, int, int, int);
 void fillrect(int, int, int, int, int);
+void drawpolygon(int *, int, int);
+void fillpolygon(int *, int, int);

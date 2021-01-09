@@ -871,7 +871,7 @@ int consolevgamode(int vgamode) {
             writeVideoRegisters(registers_640x480x16);
             currentvgamode = 0x12;
             errorcode = 0;
-            consoleclearscreen();
+            consoleclearscreen(0);
         } break;
 
         case 0x13: {
@@ -879,7 +879,7 @@ int consolevgamode(int vgamode) {
             writeVideoRegisters(registers_320x200x256);
             currentvgamode = 0x13;
             errorcode = 0;
-            consoleclearscreen();
+            consoleclearscreen(0);
         } break;
     }
 
@@ -930,16 +930,21 @@ uchar* consolevgabuffer() {
 
 // Console graphics functions
 
-void consoleclearscreen() {
+void consoleclearscreen(int colour) {
     if (currentvgamode == 0x13) {
-        memset(VGA_0x13_MEMORY, 0, VGA_0x13_WIDTH * VGA_0x13_HEIGHT);
+        memset(VGA_0x13_MEMORY, colour, VGA_0x13_WIDTH * VGA_0x13_HEIGHT);
     } 
     else if (currentvgamode == 0x12) {
         int size = (VGA_0x12_WIDTH * VGA_0x12_HEIGHT) / 8;
         for (int i = 0; i < 4; i++) {
+            int bit = (colour >> i) & 1;
             consolevgaplane(i);
             uchar* addr = (uchar*)consolevgabuffer();
-            memset(addr, 0, size);
+            if (bit) {
+                memset(addr, 255, size);
+            } else {
+                memset(addr, 0, size);
+            }
         }
     }
 }
@@ -977,29 +982,123 @@ int consolesetpixel(int x, int y, int colour) {
     return 0;
 }
 
+void setpixelmode12(int x, int y, uchar byte, int colour) {
+    
+    int memoffset = VGA_0x12_WIDTH * y + x;
+    memoffset /= 8;
+
+    for (int i = 0; i < 4; i++) {
+        int bit = (colour >> i) & 1;
+        consolevgaplane(i);
+        uchar* addr = consolevgabuffer() + memoffset;
+        if (bit) {
+            *addr = byte | *addr;
+        } else {
+            *addr = ~(byte) & *addr;
+        }
+    }
+}
+
 // Bresenham Line Algorithm
 void consoledrawline(int x0, int y0, int x1, int y1, int colour) {
+    // Need to make sure drawing from left to right for mode 12 algorithm to work
+    if (x0 > x1) {
+        int temp = x0;
+        x0 = x1;
+        x1 = temp;
+        temp = y0;
+        y0 = y1;
+        y1 = temp;
+    }
+
     int dx =  abs (x1 - x0); 
     int dy = -abs (y1 - y0);
-    int sx = x0 < x1 ? 1 : -1;
+    int sx = 1;
     int sy = y0 < y1 ? 1 : -1; 
     int err = dx + dy; 
     int e2;
-    
-    consolesetpixel(x0, y0, colour);
-    while (!(x0 == x1 && y0 == y1)) {
 
-        e2 = 2 * err;
-        if (e2 >= dy) { 
-            err += dy; 
-            x0 += sx; 
-        }
-        if (e2 <= dx) { 
-            err += dx; 
-            y0 += sy; 
-        }
+    if (currentvgamode == 0x13) {
         consolesetpixel(x0, y0, colour);
-    }
+        while (!(x0 == x1 && y0 == y1)) {
+
+            e2 = 2 * err;
+            if (e2 >= dy) { 
+                err += dy; 
+                x0 += sx; 
+            }
+            if (e2 <= dx) { 
+                err += dx; 
+                y0 += sy; 
+            }
+            consolesetpixel(x0, y0, colour);
+        }
+    } else if (currentvgamode == 0x12) {
+        // slightly more efficient solution for draw line in mode 12
+        // chunks the pixels together in the byte value
+        int x = x0;
+        int y = y0;
+        int bitoffset = x0 % 8;
+        uchar byte = 0;
+
+        byte |= 128 >> bitoffset;
+
+        while (!(x0 == x1 && y0 == y1)) {
+            e2 = 2 * err;
+            if (e2 >= dy) { 
+                err += dy; 
+                x0 += sx; 
+            }
+            if (e2 <= dx) { 
+                err += dx; 
+                y0 += sy; 
+            }
+
+            bitoffset = x0 % 8;
+            if (bitoffset == 0 || y0 != y) {
+                setpixelmode12(x, y, byte, colour);
+                y = y0;
+                x = x0;
+                byte = 0;
+            }
+
+            byte |= 128 >> bitoffset;
+        }
+        // last line of pixels
+        bitoffset = x0 % 8;
+        byte |= 128 >> bitoffset;
+
+        setpixelmode12(x, y, byte, colour);
+    }   
+}
+
+// Bresenham cicrlce algorithm
+void circlepoints(int xc, int yc, int x, int y, int colour) {
+    consolesetpixel(xc+x, yc+y, colour); 
+    consolesetpixel(xc-x, yc+y, colour); 
+    consolesetpixel(xc+x, yc-y, colour); 
+    consolesetpixel(xc-x, yc-y, colour); 
+    consolesetpixel(xc+y, yc+x, colour); 
+    consolesetpixel(xc-y, yc+x, colour); 
+    consolesetpixel(xc+y, yc-x, colour); 
+    consolesetpixel(xc-y, yc-x, colour); 
+}
+
+void consoledrawcircle(int xc, int yc, int r, int colour) {
+    int x = 0;
+    int y = r; 
+    int d = 3 - 2 * r; 
+    circlepoints(xc, yc, x, y, colour); 
+    while (y >= x) {       
+        x++; 
+        if (d > 0) { 
+            y--;  
+            d = d + 4 * (x - y) + 10; 
+        } 
+        else
+            d = d + 4 * x + 6; 
+        circlepoints(xc, yc, x, y, colour); 
+    } 
 }
 
 void memsethorizontalline(int y, int x0, int x1, int colour) {
@@ -1036,7 +1135,7 @@ void memsethorizontalline(int y, int x0, int x1, int colour) {
 }
 
 void consolefillrect(int x, int y, int width, int height, int colour) {
-    // if width is 1 byte or less just use simple algorithm
+    // if width is 1 byte or less just use simple algorithm for mode 12
     if (currentvgamode == 0x13 ||  width <= 8) {
         for (int i = x; i < x + width; i++) {
             for (int j = y; j < y + height; j++) {
@@ -1048,7 +1147,7 @@ void consolefillrect(int x, int y, int width, int height, int colour) {
         if (x + width > VGA_0x12_WIDTH) {
             width = VGA_0x12_WIDTH - x;
         }
-        if (height > VGA_0x12_HEIGHT) {
+        if (y + height > VGA_0x12_HEIGHT) {
             height = VGA_0x12_HEIGHT - y;
         }
 
@@ -1058,4 +1157,27 @@ void consolefillrect(int x, int y, int width, int height, int colour) {
             memsethorizontalline(i, x, x + width, colour);
         }
     }
+}
+
+void consolefillpolygon(int *points, int count, int colour) {
+    for (int i = 0; i < count; i+=2) {
+        cprintf("x: %d, y: %d\n", points[i], points[i + 1]);
+    }
+}
+
+void consoledrawpolygon(int *points, int count, int colour) {
+    // loop through the points and draw a line between them all
+    for (int i = 0; i < count * 2 - 2; i+=2) {
+        int x0 = points[i];
+        int y0 = points[i + 1];
+        int x1 = points[i + 2];
+        int y1 = points[i + 3];
+        consoledrawline(x0, y0, x1, y1, colour);
+    }
+    // connect the first and last points
+    int x0 = points[0];
+    int y0 = points[1];
+    int x1 = points[(count * 2) - 2];
+    int y1 = points[(count * 2) - 1];
+    consoledrawline(x0, y0, x1, y1, colour);
 }
