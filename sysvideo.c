@@ -68,10 +68,10 @@ int sys_senddrawcalls(void) {
                 consolefillrect(call.x, call.y, call.width, call.height, call.colour);
                 break;
             case FILL_POLY:
-                consolefillpolygon(call.points, call.count, call.colour);
+                consolefillpolygon(call.points, call.vertices, call.colour);
                 break;
             case DRAW_POLY:
-                consoledrawpolygon(call.points, call.count, call.colour);
+                consoledrawpolygon(call.points, call.vertices, call.colour);
                 break;
             default:
                 break;

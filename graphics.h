@@ -31,7 +31,7 @@ typedef struct drawcall {
         };
         struct {
             int* points;
-            int count;
+            int vertices;
         };
     };
     
@@ -44,7 +44,3 @@ typedef struct drawcalls {
     int index;
     int size;
 } drawcalls;
-
-drawcalls *newdrawcalls();
-void addcall();
-void freecalls(drawcalls *calls);

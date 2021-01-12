@@ -15,6 +15,7 @@
 #include "proc.h"
 #include "x86.h"
 #include "maths.h"
+#include "graphics.h"
 
 #define VGA_0x03_MEMORY P2V(0xb8000)
 #define VGA_0x03_WIDTH 80
@@ -1123,15 +1124,17 @@ void memsethorizontalline(int y, int x0, int x1, int colour) {
         }
     }
 
-    // just use set pixel for parts of the line
-    // which don't fit inside one single byte
+    // do this for the sides of the rect where the pixels don't fit inside a full byte
+    uchar left = 0;
     for (int i = bitoffset1; i < 8; i++) {
-        consolesetpixel(x0 + 7 - i, y, colour);
+        left |= 128 >> i;
     }
-
+    setpixelmode12(x0, y, left, colour);
+    uchar right = 0;
     for (int i = 0; i < bitoffset2; i++) {
-        consolesetpixel(x1 - 1 - i, y, colour);
+        right |= 128 >> i;
     }
+    setpixelmode12(x1, y, right, colour);
 }
 
 void consolefillrect(int x, int y, int width, int height, int colour) {
@@ -1159,15 +1162,202 @@ void consolefillrect(int x, int y, int width, int height, int colour) {
     }
 }
 
-void consolefillpolygon(int *points, int count, int colour) {
-    for (int i = 0; i < count; i+=2) {
-        cprintf("x: %d, y: %d\n", points[i], points[i + 1]);
+typedef struct edgebucket {
+    int ymax;
+    int ymin;
+    int x;
+    int sign;
+    int dx;
+    int dy;
+    int sum;
+} edgebucket;
+
+typedef struct edgelist {
+    edgebucket array[20];
+    int count;
+} edgelist;
+
+int add(edgelist *edges, edgebucket edge) {
+    if (edge.ymax != edge.ymin) {
+        edges->array[edges->count] = edge;
+        edges->count++;
+        return 0;
+    } else {
+        return -1;
     }
 }
 
-void consoledrawpolygon(int *points, int count, int colour) {
+edgebucket remove(edgelist *edges, int index) {
+    edgebucket removed = edges->array[index];
+    for (int i = index; i < edges->count - 1; i++) {
+        edges->array[i] = edges->array[i + 1];
+    }
+    edges->count--;
+    return removed;
+}
+
+edgebucket pairvertices(int x0, int y0, int x1, int y1) {
+    int ymax;
+    int ymin;
+    int x;
+    int sign = 0;
+    if (y0 > y1) {
+        ymax = y0;
+        ymin = y1;
+        x = x0;
+        if (x0 != x1) {
+            sign = x0 < x1 ? 1 : -1;
+        }
+    } else {
+        ymax = y1;
+        ymin = y0;
+        x = x1;
+        if (x0 != x1) {
+            sign = x1 < x0 ? 1 : -1;
+        }
+    }
+
+    edgebucket edge = (struct edgebucket){ .ymax = ymax, .ymin = ymin, .x = x, .sign = sign,
+        .dx = abs (x1 - x0), .dy = abs (y1 - y0), .sum = 0 };
+    return edge;
+}
+
+void sortymax(edgelist *edges) {
+    // bubble sort :)
+    bool sorted = 0;
+    while (!sorted) {
+        sorted = 1;
+        for (int i = 0; i < edges->count - 1; i++) {
+            if (edges->array[i].ymax < edges->array[i + 1].ymax) {
+                sorted = 0;
+                edgebucket temp = edges->array[i];
+                edges->array[i] = edges->array[i + 1];
+                edges->array[i + 1] = temp;
+            }
+        }
+    }
+}
+
+void sortx(edgelist *edges) {
+    // bubble sort :)
+    bool sorted = 0;
+    while (!sorted) {
+        sorted = 1;
+        for (int i = 0; i < edges->count - 1; i++) {
+            if (edges->array[i].x > edges->array[i + 1].x) {
+                sorted = 0;
+                edgebucket temp = edges->array[i];
+                edges->array[i] = edges->array[i + 1];
+                edges->array[i + 1] = temp;
+            }
+        }
+    }
+}
+
+void print(edgelist *edges) {
+    for (int i = 0; i < edges->count; i++) {
+        cprintf("ymax: %d, ", edges->array[i].ymax);
+        cprintf("ymin: %d, ", edges->array[i].ymin);
+        cprintf("x: %d, ", edges->array[i].x);
+        cprintf("sign: %d, ", edges->array[i].sign);
+        cprintf("dx: %d, ", edges->array[i].dx);
+        cprintf("dy: %d, ", edges->array[i].dy);
+        cprintf("sum: %d, ", edges->array[i].sum);
+        cprintf("\n");
+    }
+    cprintf("----------------\n");
+}
+
+void consolefillpolygon(int *points, int vertices, int colour) {
+
+
+    edgelist edges = (struct edgelist){ .count = 0 };
+    edgelist active = (struct edgelist){ .count = 0};
+
+    //  Loop through the points; create edges and added them to the edge list
+    if (points[vertices * 2 - 2] < points[0]) {
+        if (add(&edges, pairvertices(points[vertices * 2 - 2], points[vertices * 2 - 1], points[0], points[1])) == -1) {
+            //memsethorizontalline(points[vertices * 2 - 1], points[vertices * 2 - 2], points[0], colour);
+        }
+    } else {
+        if (add(&edges, pairvertices(points[0], points[1], points[vertices * 2 - 2], points[vertices * 2 - 1])) == -1) {
+            //memsethorizontalline(points[vertices * 2 - 1], points[0], points[vertices * 2 - 2],  colour);
+        }
+    }
+    for (int i = 0; i < vertices * 2 - 2; i+=2) {
+        if (points[i] < points[i + 2]) {
+            if (add(&edges, pairvertices(points[i], points[i + 1], points[i + 2], points[i + 3])) == -1) {
+                //memsethorizontalline(points[i + 1], points[i], points[i + 2],  colour);
+            }
+        } else {
+            if (add(&edges, pairvertices(points[i + 2], points[i + 3], points[i], points[i + 1])) == -1) {
+                //memsethorizontalline(points[i + 1], points[i], points[i + 2],  colour);
+            }
+        }
+    }
+    cprintf("GOT HERE!\n");
+
+    // sort edge list by ymin;
+    //print(&edges);
+    sortymax(&edges);
+    //print(&edges);
+
+    // scanline algorithm loop
+    int scanline = edges.array[0].ymax;
+    cprintf("scanline %d\n", scanline);
+    while (edges.count != 0 || active.count != 0) {
+        // remove edges from active list if ymin = scanline
+        for (int i = active.count - 1; i >= 0; i--) {
+            if (active.array[i].ymin == scanline) {
+                remove(&active, i);
+            }
+        }
+
+        // move edges to active list if ymax = scanline
+        for (int i = edges.count - 1; i >= 0; i--) {
+            if (edges.array[i].ymax == scanline) {
+                add(&active, remove(&edges, i));
+            }
+        }
+
+        // sort active list by x
+        sortx(&active);
+        //cprintf("count: %d\n", active.count);
+
+        // fill in the lines
+        if (active.count % 2 == 0) {
+            //print(&active);
+            for (int i = 0; i < active.count; i += 2) {
+                int x0 = active.array[i].x;
+                int x1 = active.array[i + 1].x;
+                
+                if (x1 - x0 > 8) {
+                    memsethorizontalline(scanline, x0, x1, colour);
+                } else {
+                    for (int j = x0; j < x1; j++) {
+                        consolesetpixel(j, scanline, colour);
+                    }  
+                }
+            }
+        }
+
+        scanline--;
+
+        // increment x slope in active list
+        for (int i = 0; i < active.count; i++) {
+            active.array[i].sum += active.array[i].dx;
+
+            while (active.array[i].sum >= active.array[i].dy) {
+                active.array[i].x += active.array[i].sign;
+                active.array[i].sum -= active.array[i].dy;
+            }
+        }
+    }
+}
+
+void consoledrawpolygon(int *points, int vertices, int colour) {
     // loop through the points and draw a line between them all
-    for (int i = 0; i < count * 2 - 2; i+=2) {
+    for (int i = 0; i < vertices * 2 - 2; i+=2) {
         int x0 = points[i];
         int y0 = points[i + 1];
         int x1 = points[i + 2];
@@ -1177,7 +1367,7 @@ void consoledrawpolygon(int *points, int count, int colour) {
     // connect the first and last points
     int x0 = points[0];
     int y0 = points[1];
-    int x1 = points[(count * 2) - 2];
-    int y1 = points[(count * 2) - 1];
+    int x1 = points[(vertices * 2) - 2];
+    int y1 = points[(vertices * 2) - 1];
     consoledrawline(x0, y0, x1, y1, colour);
 }

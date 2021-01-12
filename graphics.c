@@ -5,55 +5,6 @@
 // instance of the dynamic array
 drawcalls *calls = 0;
 
-void drawbegin(videomode mode) {
-    setvideomode(mode);
-    calls = newdrawcalls();
-}
-
-void drawend() {
-    senddrawcalls(calls);
-    free(calls->array);
-    getch();
-    setvideomode(0x03);
-}
-
-void fillscreen(int colour) {
-    drawcall call = (struct drawcall){ .colour = colour, .type = FILL_SCREEN };
-    addcall(calls, call);
-}
-
-void drawpixel(int x, int y, int colour) {
-    drawcall call = (struct drawcall){ .x = x, .y = y, .colour = colour, .type = DRAW_PIXEL };
-    addcall(calls, call);
-}
-
-void drawline(int x0, int y0, int x1, int y1, int colour) {
-    drawcall call = (struct drawcall){ .x0 = x0, .y0 = y0, .x1 = x1, .y1 = y1, .colour = colour, .type = DRAW_LINE };
-    addcall(calls, call);
-}
-
-void drawcircle(int x, int y, int r, int colour) {
-    drawcall call = (struct drawcall){ .x = x, .y = y, .r = r, .colour = colour, .type = DRAW_CIRCLE };
-    addcall(calls, call); 
-}
-
-void fillrect(int x, int y, int width, int height, int colour) {
-    drawcall call = (struct drawcall){ .x = x, .y = y, .width = width, .height = height, .colour = colour, .type = FILL_RECT };
-    addcall(calls, call);
-}
-
-void drawpolygon(int *points, int count, int colour) {
-    drawcall call = (struct drawcall){ .points = points, .count = count, .colour = colour, .type = DRAW_POLY };
-    addcall(calls, call);
-}
-
-void fillpolygon(int *points, int count, int colour) {
-    drawcall call = (struct drawcall){ .points = points, .count = count, .colour = colour, .type = FILL_POLY };
-    addcall(calls, call);
-}
-
-
-
 // **dynamic array functions**
 drawcalls *newdrawcalls() {
     drawcalls *calls = (drawcalls *)malloc(sizeof(drawcalls));
@@ -88,4 +39,54 @@ void freecalls(drawcalls *calls) {
         free(calls->array);
     } 
     free(calls);
+}
+
+
+// USER GRAPHICS API
+
+void drawbegin(videomode mode) {
+    setvideomode(mode);
+    calls = newdrawcalls();
+}
+
+void drawend() {
+    senddrawcalls(calls);
+    getch();
+    freecalls(calls);
+    setvideomode(0x03);
+}
+
+void fillscreen(int colour) {
+    drawcall call = (struct drawcall){ .colour = colour, .type = FILL_SCREEN };
+    addcall(calls, call);
+}
+
+void drawpixel(int x, int y, int colour) {
+    drawcall call = (struct drawcall){ .x = x, .y = y, .colour = colour, .type = DRAW_PIXEL };
+    addcall(calls, call);
+}
+
+void drawline(int x0, int y0, int x1, int y1, int colour) {
+    drawcall call = (struct drawcall){ .x0 = x0, .y0 = y0, .x1 = x1, .y1 = y1, .colour = colour, .type = DRAW_LINE };
+    addcall(calls, call);
+}
+
+void drawcircle(int x, int y, int r, int colour) {
+    drawcall call = (struct drawcall){ .x = x, .y = y, .r = r, .colour = colour, .type = DRAW_CIRCLE };
+    addcall(calls, call); 
+}
+
+void fillrect(int x, int y, int width, int height, int colour) {
+    drawcall call = (struct drawcall){ .x = x, .y = y, .width = width, .height = height, .colour = colour, .type = FILL_RECT };
+    addcall(calls, call);
+}
+
+void drawpolygon(int *points, int vertices, int colour) {
+    drawcall call = (struct drawcall){ .points = points, .vertices = vertices, .colour = colour, .type = DRAW_POLY };
+    addcall(calls, call);
+}
+
+void fillpolygon(int *points, int vertices, int colour) {
+    drawcall call = (struct drawcall){ .points = points, .vertices = vertices, .colour = colour, .type = FILL_POLY };
+    addcall(calls, call);
 }
