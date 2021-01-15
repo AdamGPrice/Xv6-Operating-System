@@ -1,6 +1,8 @@
 #include "types.h"
 #include "user.h"
 
+// MODE 13 Without batching demo
+
 int main() {
     setvideomode(0x13);
 

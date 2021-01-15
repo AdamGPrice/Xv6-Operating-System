@@ -189,6 +189,8 @@ UPROGS=\
 	_zombie\
 	_demo\
 	_demo2\
+	_demo3\
+	_demo4\
 
 fs.img: mkfs $(UPROGS)
 	./mkfs fs.img $(UPROGS)
